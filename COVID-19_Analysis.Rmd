@@ -1,0 +1,526 @@
+---
+title: "COVID-19_Analysis"
+author: "Solomon"
+date: "2024-08-10"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+##In this report, R is used to import, tidy, transform, visualize, and model COVID-19 data. The details of the process are given in the steps below.
+
+##### Step 1 Import R libraries and set up environment
+
+```{r }
+library(plotly)
+library(tidyverse)
+library(lubridate)
+options(warn=-1)
+options(dplyr.summarise.inform = FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+### Step 2 Download and import COVID-19 source data files. Tidyverse package used to Read the CSV directly from the data sources.
+
+```{r}
+url_in <- 
+  'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/'
+filenames <- c('time_series_covid19_confirmed_global.csv', 'time_series_covid19_deaths_global.csv', 'time_series_covid19_confirmed_US.csv', 'time_series_covid19_deaths_US.csv')
+
+confirmed_global <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv")
+deaths_global <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv")
+confirmed_us <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv")
+deaths_us <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv")
+uid_lookup_url <- 
+  'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv'
+uid <- read_csv(uid_lookup_url) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+urls <- str_c(url_in, filenames)
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+
+```
+
+```{r}
+
+```
+
+
+
+```{r}
+# Read .csv file for US COVID-19 vaccinations
+url_in <- 
+  'https://covid.ourworldindata.org/data/vaccinations/us_state_vaccinations.csv'
+US_vaccinations <- read_csv(url_in) %>%
+  select(-c(total_vaccinations, total_distributed, people_vaccinated, people_fully_vaccinated,
+            daily_vaccinations_raw, daily_vaccinations, daily_vaccinations_per_million,
+            share_doses_used, total_boosters)) %>%
+  rename(Province_State = 'location')
+```
+```{r}
+head(confirmed_global)
+sort(colnames(confirmed_global), decreasing = TRUE)
+head(deaths_global)
+sort(colnames(deaths_global), decreasing = TRUE)
+```
+```{r}
+head(confirmed_us)
+head(deaths_us)
+
+```
+```{r}
+cases <- confirmed_us %>%
+  pivot_longer(cols = -c(UID:Combined_Key), names_to = "date", values_to = "Cases")%>%
+  select(-c(iso2, iso3, code3, FIPS, UID, Country_Region))%>%
+  mutate(date = mdy(date))
+
+summary(cases)
+
+
+deaths <- deaths_us %>%
+  pivot_longer(cols = -c(UID:Population), names_to = "date", values_to = "deaths")%>%
+  select(-c(iso2, iso3, code3, FIPS, UID, Country_Region))%>%
+  mutate(date = mdy(date))
+
+summary(deaths)
+
+
+```
+
+```{r}
+# For 'global_cases' df, make 'Province/State' and 'Country/Region' factors and pivot dates into rows
+global_cases <- mutate_at(global_cases, vars('Province/State', 'Country/Region'), as.factor) %>%
+	pivot_longer(cols = -c('Province/State', 'Country/Region', 'Lat', 'Long'), 
+	             names_to = 'Date', 
+	             values_to = 'Cases') %>%
+	select(-c('Lat', 'Long'))
+
+# For 'global_deaths' df, make 'Province/State' and 'Country/Region' factors and pivot dates into rows
+global_deaths <- mutate_at(global_deaths, vars('Province/State', 'Country/Region'), as.factor) %>%
+	pivot_longer(cols = -c('Province/State', 'Country/Region', 'Lat', 'Long'),
+			names_to = 'Date',
+			values_to = 'Deaths') %>%
+	select(-c('Lat', 'Long'))
+
+# Merge 'global_cases' df and 'global_deaths' df into 'global' df and rename columns
+
+```
+
+```{r}
+global <- global_cases %>%
+	full_join(global_deaths) %>%
+	rename(Country_Region = 'Country/Region',
+			Province_State = 'Province/State') %>%
+	mutate(Date = mdy(Date))
+
+# Combine 'Province_State' and 'Country_Region' columns into one 'Combined_Key' column
+global <- global %>%
+	unite('Combined_Key',
+		c(Province_State, Country_Region),
+		sep = ', ',
+		na.rm = TRUE,
+		remove = FALSE)
+
+# Join 'global' df with global population lookup table df and remove unneeded columns
+global <- global %>%
+	left_join(uid, by = c('Province_State', 'Country_Region')) %>%
+	select(-c(UID, FIPS)) %>%
+	select(Province_State, Country_Region, Date,
+		Cases, Deaths, Population, Combined_Key)
+```
+
+```{r}
+
+```
+
+
+
+
+```{r}
+global_cases_per_hundred <- global %>%
+  group_by(Country_Region, Population) %>%
+  summarize(Cases = max(Cases), Population = max(Population, na.rm = T)) %>%
+  mutate(Cases_per_hundred = (Cases/Population)*100) %>%
+  arrange(desc(Cases_per_hundred)) %>%
+  filter(Population > 0) %>%
+  select(Country_Region, Population, Cases, Cases_per_hundred) %>%
+  ungroup()
+```
+
+```{r}
+global_cases_per_hundred <- global_cases_per_hundred %>%
+  group_by(Country_Region, Population) %>%
+  summarize(Cases = sum(Cases), Population = sum(Population)) %>%
+  summarize(Cases = max(Cases), Population = max(Population, na.rm = T)) %>%
+  mutate(Cases_per_hundred = (Cases/Population)*100) %>%
+  arrange(desc(Cases_per_hundred)) %>%
+  filter(Population > 0) %>%
+  select(Country_Region, Population, Cases, Cases_per_hundred) %>%
+  ungroup()
+```
+```{r}
+global_deaths_per_hundred <- global %>%
+  group_by(Country_Region, Population) %>%
+  summarize(Deaths = max(Deaths), Population = max(Population, na.rm = T)) %>%
+  mutate(Deaths_per_hundred = (Deaths/Population)*100) %>%
+  arrange(desc(Deaths_per_hundred)) %>%
+  filter(Population > 0) %>%
+  select(Country_Region, Population, Deaths, Deaths_per_hundred) %>%
+  ungroup()
+
+# Combine populations and death totals for countries with 'State_Province' factors
+global_deaths_per_hundred <- global_deaths_per_hundred %>%
+  group_by(Country_Region, Population) %>%
+  summarize(Deaths = sum(Deaths), Population = sum(Population)) %>%
+  summarize(Deaths = max(Deaths), Population = max(Population, na.rm = T)) %>%
+  mutate(Deaths_per_hundred = (Deaths/Population)*100) %>%
+  arrange(desc(Deaths_per_hundred)) %>%
+  filter(Population > 0) %>%
+  select(Country_Region, Population, Deaths, Deaths_per_hundred) %>%
+  ungroup()
+```
+
+```{r}
+US_cases <- mutate_at(US_cases, vars(Admin2, Province_State, Country_Region), as.factor) %>%
+  rename(County = 'Admin2') %>%
+	pivot_longer(cols = -(UID:Combined_Key),
+		names_to = 'Date',
+		values_to = 'Cases') %>%
+  filter(Cases >= 0) %>%
+	select(County:Cases) %>%
+	mutate(Date = mdy(Date)) %>%
+	select(-c(Lat, Long_))
+
+# For 'US_deaths' df, create factors and pivot dates into rows, change 'Date' column to mdy
+US_deaths <- mutate_at(US_deaths, vars(Admin2, Province_State, Country_Region), as.factor) %>%
+  rename(County = 'Admin2') %>%
+	pivot_longer(cols = -(UID:Population),
+		names_to = 'Date',
+		values_to = 'Deaths') %>%
+  filter(Deaths >= 0) %>%
+	select(County:Deaths) %>%
+	mutate(Date = mdy(Date)) %>%
+	select(-c(Lat, Long_))
+
+# Merge 'US_cases' df and 'US_deaths' df into 'US' df
+US <- US_cases %>%
+	full_join(US_deaths)
+
+# For 'US_by_state' df, calculate sums of 'Cases', 'Deaths', and 'Population' variables by US state
+US_by_state <- US %>%
+	group_by(Province_State, Country_Region, Date) %>%
+	summarize(Cases = sum(Cases), Deaths = sum(Deaths), Population = sum(Population)) %>%
+	select(Province_State, Country_Region, Date, Cases, Deaths, Population) %>%
+	ungroup()
+
+# For 'US_by_state_cases_deaths_per_day' df, calculate 'New_Cases' and 'New_Deaths' variables
+US_by_state_cases_deaths_per_day <- US_by_state %>%
+  group_by(Province_State) %>%
+  mutate(New_Cases = Cases - lag(Cases),
+         New_Deaths = Deaths - lag(Deaths)) %>%
+  select(Province_State, Country_Region, Date, Cases, Deaths, Population,
+         New_Cases, New_Deaths) %>%
+  ungroup()
+```
+
+
+
+```{r}
+index1 <- which(US_by_state_cases_deaths_per_day$New_Cases >= 0)
+US_by_state_cases_deaths_per_day <- US_by_state_cases_deaths_per_day[index1,]
+
+# Remove negative 'New_Deaths' values from 'US_by_state_cases_deaths_per_day' df
+index2 <- which(US_by_state_cases_deaths_per_day$New_Deaths >= 0)
+US_by_state_cases_deaths_per_day <- US_by_state_cases_deaths_per_day[index2,]
+
+# Group 'US_by_state_cases_deaths_per_day' df by 'Province_State' and filter rows with population > 0
+US_by_state_cases_deaths_per_day <- US_by_state_cases_deaths_per_day %>%
+  group_by(Province_State, Date) %>%
+  select(Province_State, Country_Region, Date, Cases, Deaths, Population,
+         New_Cases, New_Deaths) %>%
+  filter(Population > 0) %>%
+  ungroup()
+
+# Group by 'Province_State', record max in 'Cases' variable, and calculate 'Cases_per_hundred' variable
+US_by_state_cases_per_hundred <- US_by_state %>%
+  group_by(Province_State, Population) %>%
+  summarize(Cases = max(Cases)) %>%
+  mutate(Cases_per_hundred = (Cases/Population)*100) %>%
+  arrange(desc(Cases_per_hundred)) %>%
+  filter(Population > 0) %>%
+  select(Province_State, Population, Cases, Cases_per_hundred) %>%
+  ungroup()
+
+# Group by 'Province_State', record max in 'Deaths' variable, and calculate 'Deaths_per_hundred' variable
+US_by_state_deaths_per_hundred <- US_by_state %>%
+  group_by(Province_State, Population) %>%
+  summarize(Deaths = max(Deaths)) %>%
+  mutate(Deaths_per_hundred = (Deaths/Population)*100) %>%
+  arrange(desc(Deaths_per_hundred)) %>%
+  filter(Population > 0) %>%
+  select(Province_State, Population, Deaths, Deaths_per_hundred) %>%
+  ungroup()
+```
+```{r}
+US_vaccinations <- mutate_at(US_vaccinations, vars('Province_State'), as.factor)
+
+# Create 'US_by_state_vaccinations_per_hundred' df holding max vaccination rates per US state
+US_by_state_vaccinations_per_hundred <- US_vaccinations %>%
+  group_by(Province_State) %>%
+  mutate(Province_State = fct_recode(Province_State,
+    "New York" = "New York State")) %>%
+  summarize(people_fully_vaccinated_per_hundred = max(people_fully_vaccinated_per_hundred, na.rm = T),
+            total_vaccinations_per_hundred = max(total_vaccinations_per_hundred, na.rm = T), 
+            people_vaccinated_per_hundred = max(people_vaccinated_per_hundred, na.rm = T),
+            distributed_per_hundred = max(distributed_per_hundred, na.rm = T),
+            total_boosters_per_hundred = max(total_boosters_per_hundred, na.rm = T))
+
+# Merge 'US_by_state_deaths_per_hundred' df and 'US_by_state_vaccinations_per_hundred' df
+US_by_state_deaths_vaccinations_per_hundred <- US_by_state_deaths_per_hundred %>%
+	full_join(US_by_state_vaccinations_per_hundred) %>%
+  filter(Population > 0)
+```
+
+
+
+## Step 3: Visualization
+
+## On this plot i used a dot plot to reduce clutter and make it easier to compare values. 
+
+
+
+
+```{r}
+ggplot(global_cases_per_hundred, aes(x = reorder(Country_Region, +Cases_per_hundred), y = Cases_per_hundred)) +
+  geom_point(aes(color = Cases_per_hundred), size = 3) +
+  scale_color_viridis_c(option = "magma") +
+  labs(x = "Country", y = "# COVID-19 Cases per Hundred People", title = "Global COVID-19 Cases per Hundred People by Country") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 6))
+```
+## Treemap can provide a visual representation of the data in a hierachical manner. A treemap could show each country as a rectangle, with the size of the rectangle representing the number of cases. Countries with more cases would have larger rectangles. If you add another layer, like continents, the treemap would first show rectangles for each continent, and within each continent, rectangles for each country. In this project cases per Hundred People it is a normalized metric that shows the number of COVID-19 cases per hundred people in the population. It helps to compare the impact of COVID-19 across countries with different population sizes.One might ask why Latvia smaller country has a bigger rectangle than the US? The answer is  because the treemap is visualizing the normalized metric (cases per hundred people) rather than the absolute number of cases. I have added for your understanding the absolute number case plot right after this one. 
+```{r}
+library(treemapify)
+ggplot(global_cases_per_hundred, aes(area = Cases_per_hundred, fill = Cases_per_hundred, label = Country_Region)) +
+  geom_treemap() +
+  geom_treemap_text(colour = "white", place = "centre", grow = TRUE) +
+  scale_fill_viridis_c(option = "magma") +
+  labs(title = "Global COVID-19 Cases per Hundred People by Country")
+```
+```{r}
+ggplot(global_cases_per_hundred, aes(area = Cases, fill = Cases_per_hundred, label = Country_Region)) +
+  geom_treemap() +
+  geom_treemap_text(colour = "white", place = "centre", grow = TRUE) +
+  scale_fill_viridis_c(option = "magma") +
+  labs(title = "Global COVID-19 Cases by Country")
+```
+
+## Using plotly pacakge can make our plot interactive and alowing to zoom in and out. 
+```{r}
+library(plotly)
+p <- ggplot(US_by_state_cases_deaths_per_day, aes(x = Date, y = New_Deaths, color = Province_State)) +
+  geom_line() +
+  facet_wrap(~Province_State) +
+  labs(x = "", y = "# of COVID-19 Deaths", title = "COVID-19 Deaths in the US", subtitle = "By State/Territory") +
+  theme(legend.position = "none")
+ggplotly(p)
+```
+```{r}
+
+```
+
+
+## Here I am trying to build different model. 
+##We will build a model based on cases per 1000 and deaths per 1000, output the summary, then add the predictions to the Mass. county data.
+```{r}
+ggplot(data = US_by_state_deaths_vaccinations_per_hundred, aes(x = people_fully_vaccinated_per_hundred, 
+                                                               y = Deaths_per_hundred, 
+                                                               color = Province_State,  # Color by state
+                                                               label = Province_State)) +
+  geom_point(size = .4) +
+  geom_text(size = 1.7, vjust = .5, hjust = -.1) +
+  geom_smooth(method = "lm", se = FALSE) +  # Add linear regression line without confidence interval
+  labs(x = "# fully vaccinated per hundred people",
+       y = "# of COVID-19 deaths per hundred people",
+       title = "US COVID-19 Deaths / # of Fully Vaccinated People - Linear Model",
+       subtitle = "By US State/Territory") +
+  theme_minimal()  # Use a minimal theme for better readability
+```
+
+
+
+```{r}
+
+```
+
+```{r}
+cases <- confirmed_us %>%
+  pivot_longer(cols = -c(UID:Combined_Key), names_to = "date", values_to = "Cases")%>%
+  select(-c(iso2, iso3, code3, FIPS, UID, Country_Region))%>%
+  mutate(date = mdy(date))
+
+summary(cases)
+
+
+deaths <- deaths_us %>%
+  pivot_longer(cols = -c(UID:Population), names_to = "date", values_to = "deaths")%>%
+  select(-c(iso2, iso3, code3, FIPS, UID, Country_Region))%>%
+  mutate(date = mdy(date))
+
+summary(deaths)
+
+
+```
+
+
+
+```{r}
+Mass_Cases <- cases %>%
+  filter(Province_State == "Massachusetts")#%>%
+#  group_by(Admin2)
+
+Mass_Deaths <- deaths %>%
+  filter(Province_State == "Massachusetts")#%>%
+#  group_by(Admin2)
+
+All_Mass <- Mass_Cases %>% 
+  full_join(Mass_Deaths)
+```
+
+```{r}
+Mass <- All_Mass %>%
+  mutate(deaths_per_k= deaths * 1000 / Population, cases_per_k= Cases * 1000 / Population, month_year = format_ISO8601(date, precision="ym"), Lng = Long_, month= month(date))%>%filter(Population > 0) 
+
+summary(Mass)
+head(Mass)
+```
+
+
+
+```{r}
+'Deaths & Population: ' 
+cor(Mass$deaths, Mass$Population)
+'Cases & Population: '
+cor(Mass$Cases, Mass$Population)
+'Cases & Deaths: '
+cor(Mass$Cases, Mass$deaths)
+'Cases/1000 & Deaths/1000: '
+cor(Mass$cases_per_k, Mass$deaths_per_k)
+```
+```{r}
+Mass_Model <- lm(cases_per_k ~ deaths_per_k, Mass)
+summary(Mass_Model)
+Mass_Pred <- Mass %>%
+  mutate(Prediction = predict(Mass_Model))
+```
+```{r}
+Mass_Model <- lm(Deaths_per_hundred ~ people_fully_vaccinated_per_hundred, 
+            data = US_by_state_deaths_vaccinations_per_hundred)
+summary(Mass_Model)
+```
+```{r}
+US_by_state_deaths_vaccinations_per_hundred$predicted_deaths <- predict(Mass_Model, US_by_state_deaths_vaccinations_per_hundred)
+
+ggplot(data = US_by_state_deaths_vaccinations_per_hundred, aes(x = predicted_deaths, y = Deaths_per_hundred, label = Province_State)) +
+  geom_point(size = .4) +
+  geom_text(size = 1.7, vjust = .5, hjust = -.1) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(x = "Predicted # of COVID-19 deaths per hundred people",
+       y = "Observed # of COVID-19 deaths per hundred people",
+       title = "Observed vs Predicted COVID-19 Deaths",
+       subtitle = "Multiple Regression Model")
+```
+
+
+##Using a bar plot (geom_col()) to visualize predictions for individual counties can make sense, especially if you want to compare the number of cases across different counties on specific dates. However, there are a few considerations to ensure the plot is clear and informative:
+
+```{r}
+```
+```{r}
+ggplot(Mass_Pred, aes(x = date, y = Cases, fill = Admin2)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Admin2, scales = "free_y") +
+  labs(x = "Date", y = "Number of Cases", title = "COVID-19 Cases by County") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+##Using a bar plot (geom_col()) to visualize predictions for individual counties can make sense, especially if you want to compare the number of cases across different counties on specific dates. 
+
+```{r}
+ggplot(Mass_Pred, aes(x=date, y=Cases, fill=Admin2)) +
+  geom_col(position = "dodge")
+```
+```{r}
+ggplot(Mass_Pred, aes(x="", y=Cases, fill=Admin2)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar(theta="y") +
+  theme_void()
+```
+
+```{r}
+Mass_Model <- lm(cases_per_k ~ deaths_per_k, Mass)
+summary(Mass_Model)
+Mass_Pred <- Mass %>%
+  mutate(Prediction = predict(Mass_Model))
+```
+
+
+```{r}
+Mass_County <- Mass %>%
+  group_by(Admin2)%>%
+  summarize(Max_Deaths=max(deaths), Total_Deaths = sum(deaths),Max_Cases = max(Cases), Total_Cases = sum(Cases), Population = max(Population))
+
+summary(Mass_County)
+head(Mass_County)
+```
+```{r}
+
+```
+
+
+```{r}
+massachusetts_data <- US_by_state_deaths_vaccinations_per_hundred %>%
+  filter(Province_State == "Massachusetts")
+```
+
+## To assess whether the data is unbiased, I would need to consider the data collection methods, potential confounding variables, and whether the data accurately represents the population without systematic errors.
+```{r}
+ggplot(data = massachusetts_data, aes(x = people_fully_vaccinated_per_hundred, 
+                                      y = Deaths_per_hundred, 
+                                      label = Province_State)) +
+  geom_point(size = .4) +
+  geom_text(size = 1.7, vjust = .5, hjust = -.1) +
+  geom_smooth(method = "lm") +
+  labs(x = "# fully vaccinated per hundred people",
+       y = "# of COVID-19 deaths per hundred people",
+       title = "COVID-19 Deaths vs. Fully Vaccinated People in Massachusetts",
+       subtitle = "Linear Model") +
+  theme_minimal()
+```
+
+       
+### Conclusion
+##Our prediction managed to show multiple regression and linear regression. Regression is a powerful tool for predictive analytics. Linear is fundamental and widely used in predictive analytics. Linear regression relies on several assumptions, including linearity, independence, homoscedasticity (constant variance of errors), and normality of errors.
+
+---
+
+## Step 5
+
+
+### Personal Bias
+To assess whether the data is unbiased, you would need to consider the data collection methods, potential confounding variables, and whether the data accurately represents the population without systematic errors. A dot in the middle of the plot doesn’t necessarily prove that the data is unbiased. It simply represents a specific observation where the number of fully vaccinated people and the number of deaths fall around the middle range of your dataset.
+
